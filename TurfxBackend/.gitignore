@@ -18,3 +18,8 @@ target/
 # OS files
 .DS_Store
 Thumbs.db
+/.metadata/
+
+# IDE workspace metadata
+.metadata/
+**/.metadata/
