@@ -1,17 +1,16 @@
-
 package com.turfx.service.impl;
 
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 
-import com.turfx.service.EmailService;
+import com.turfx.service.IEmailService;
 
 import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
-public class EmailServiceImpl implements EmailService 
+public class EmailServiceImpl implements IEmailService 
 {
 
     private final JavaMailSender javaMailSender;
@@ -19,21 +18,21 @@ public class EmailServiceImpl implements EmailService
     @Override
     public void sendOtpEmail(String toEmail, String otp)
     {
+    	 SimpleMailMessage message = new SimpleMailMessage();
 
-        SimpleMailMessage message = new SimpleMailMessage();
+         message.setTo(toEmail);
+         message.setSubject("Turfx - Email Verification OTP");
 
-        message.setTo(toEmail);
-        message.setSubject("Turfx - Email Verification OTP");
+         message.setText(
+                 "Hello,\n\n"
+                 + "Your Turfx registration OTP is: " + otp + "\n\n"
+                 + "This OTP is valid for 5 minutes.\n\n"
+                 + "If you did not request this OTP, please ignore this email.\n\n"
+                 + "Regards,\n"
+                 + "Turfx Team"
+         );
 
-        message.setText(
-                "Hello,\n\n"
-                + "Your Turfx registration OTP is: " + otp + "\n\n"
-                + "This OTP is valid for 5 minutes.\n\n"
-                + "If you did not request this OTP, please ignore this email.\n\n"
-                + "Regards,\n"
-                + "Turfx Team"
-        );
-
-        javaMailSender.send(message);
+         javaMailSender.send(message);
     }
+   
 }
