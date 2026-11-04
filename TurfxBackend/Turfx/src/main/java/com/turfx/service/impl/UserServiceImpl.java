@@ -1,28 +1,28 @@
 package com.turfx.service.impl;
 
-import java.security.SecureRandom;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
-import org.springframework.stereotype.Service;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
 
 import com.turfx.dto.LoginRequest;
 import com.turfx.dto.LoginResponse;
-import com.turfx.dto.PendingRegistration;
 import com.turfx.dto.RegisterRequest;
 import com.turfx.dto.ResendOtpRequest;
 import com.turfx.dto.VerifyEmailOtpRequest;
+import com.turfx.entity.PendingRegistration;
 import com.turfx.entity.User;
 import com.turfx.exception.DuplicateResourceException;
 import com.turfx.exception.InvalidCredentialsException;
 import com.turfx.exception.InvalidOtpException;
 import com.turfx.exception.OtpExpiredException;
 import com.turfx.exception.ResourceNotFoundException;
+import com.turfx.repositoty.PendingRegistrationRepository;
 import com.turfx.repositoty.UserRepository;
 import com.turfx.service.IEmailService;
-import com.turfx.service.IUserService;
 import com.turfx.service.IOtpService;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
+import com.turfx.service.IUserService;
 
 import lombok.RequiredArgsConstructor;
 
@@ -32,13 +32,12 @@ public class UserServiceImpl implements IUserService
 {
 
 	private final UserRepository userRepository;
-    private final PendingRegistrationStore pendingRegistrationStore;
+	private final PendingRegistrationRepository pendingRegistrationRepository;
     private final IEmailService emailService;
     private final PasswordEncoder passwordEncoder;
     private final IOtpService otpService;
     
-    private final SecureRandom secureRandom = new SecureRandom();
-    
+   
     //# 1 RegisterUser
    
     @Override
@@ -48,16 +47,16 @@ public class UserServiceImpl implements IUserService
     	String email = normalizeEmail(request.getEmail());
         String mobileNumber = request.getMobileNumber().trim();
 
-        // 1. Check whether email and mobile already exists
+        // 1. Check whether email and mobile already exists in db 
         assertEmailAndMobileAvailable(email, mobileNumber);
         
        // 2. Check whether email already has a pending registration
-	     if (pendingRegistrationStore.get(email) != null) 
-	     {
-	         throw new DuplicateResourceException(
-	                 "Registration is already pending for this email. Please verify OTP or request a resend."
-	         );
-	     }
+        if (pendingRegistrationRepository.existsByEmail(email)) 
+        {
+            throw new DuplicateResourceException(
+                    "Registration is already pending for this email. Please verify OTP or request a resend."
+            );
+        }
 
         // 3. Generate a 6-digit OTP
         String otp = otpService.generateOtp();
@@ -70,18 +69,19 @@ public class UserServiceImpl implements IUserService
         String encodedPassword = passwordEncoder.encode(request.getPassword());
        
         // 6. Create temporary registration object
-        PendingRegistration pendingRegistration = new PendingRegistration(
-                request.getFullName().trim(),
-                mobileNumber,
-                email,
-                encodedPassword,
-                request.getRole(),
-                otp,
-                expiryTime
-        );
+        PendingRegistration pendingRegistration = new PendingRegistration();
+
+        pendingRegistration.setFullName(request.getFullName().trim());
+        pendingRegistration.setMobileNumber(mobileNumber);
+        pendingRegistration.setEmail(email);
+        pendingRegistration.setPassword(encodedPassword);
+        pendingRegistration.setRole(request.getRole());
+        pendingRegistration.setOtp(otp);
+        pendingRegistration.setExpiryTime(expiryTime);
+
 
         // 7. Store registration temporarily
-        pendingRegistrationStore.save(email, pendingRegistration);
+        pendingRegistrationRepository.save(pendingRegistration);
 
         // 8. Send OTP to registered email
         emailService.sendOtpEmail(email, otp);
@@ -97,22 +97,20 @@ public class UserServiceImpl implements IUserService
     	String email = normalizeEmail(request.getEmail());
 
         // 1. Find pending registration using email
-        PendingRegistration pendingRegistration =
-                pendingRegistrationStore.get(email);
+    	PendingRegistration pendingRegistration =
+                pendingRegistrationRepository.findByEmail(email)
+                        .orElseThrow(() ->
+                                new ResourceNotFoundException("No pending registration found")
+                      );
 
-        // 2. Check whether registration exists
-        if (pendingRegistration == null)
-        {
-            throw new ResourceNotFoundException("No pending registration found");
-        }
 
-        // 3. Check OTP expiry
+        // 2. Check OTP expiry
         if (System.currentTimeMillis() > pendingRegistration.getExpiryTime()) 
         {
             throw new OtpExpiredException("OTP has expired. Please register again.");
         }
 
-        // 4. Verify entered OTP
+        // 3. Verify entered OTP
         boolean otpMatches = MessageDigest.isEqual(
                 pendingRegistration.getOtp().getBytes(StandardCharsets.UTF_8),
                 request.getOtp().getBytes(StandardCharsets.UTF_8)
@@ -123,7 +121,7 @@ public class UserServiceImpl implements IUserService
             throw new InvalidOtpException("Invalid OTP");
         }
 
-        // 5. Create User entity
+        // 4. Create User entity
         User user = new User();
 
         user.setFullName(pendingRegistration.getFullName());
@@ -133,12 +131,12 @@ public class UserServiceImpl implements IUserService
         user.setRole(pendingRegistration.getRole());
         user.setEmailVerified(true);
 
-        // 6. Save verified user in MySQL
+        // 5. Save verified user in MySQL
         userRepository.save(user);
 
-        // 7. Remove temporary registration
-        pendingRegistrationStore.remove(email);
-
+        // 6. Remove temporary registration
+        pendingRegistrationRepository.delete(pendingRegistration);
+        
         return "Email verified and registration completed successfully!";
     }
     
@@ -189,13 +187,12 @@ public class UserServiceImpl implements IUserService
 		String email = normalizeEmail(request.getEmail());
 
         // 1. Find existing pending registration
-        PendingRegistration pendingRegistration =
-                pendingRegistrationStore.get(email);
-
-        if (pendingRegistration == null) 
-        {
-            throw new ResourceNotFoundException("No pending registration found");
-        }
+		PendingRegistration pendingRegistration =
+                pendingRegistrationRepository.findByEmail(email)
+                        .orElseThrow(() ->
+                                new ResourceNotFoundException("No pending registration found")
+                                 
+                        	);
 
         // 2. Generate a new 6-digit OTP
         String otp = otpService.generateOtp();
@@ -211,11 +208,10 @@ public class UserServiceImpl implements IUserService
         emailService.sendOtpEmail(email, otp);
         
         // 6. Save updated pending registration
-        pendingRegistrationStore.save(email, pendingRegistration);
+        pendingRegistrationRepository.save(pendingRegistration);
 
         return "New OTP sent successfully. Please verify your email within 5 minutes.";
-    }
-	
+    } 
 	//============*=== __ Helper methods __ ===*============
 	
 	//#1 
